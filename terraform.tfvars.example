@@ -1,0 +1,11 @@
+# Copie para terraform.tfvars e ajuste. O arquivo real não é versionado.
+
+# A conta vem de AWS_PROFILE (ou das credenciais no ambiente) — não fixe perfil aqui.
+regiao     = "us-east-1"
+
+# Deixe `false` enquanto estiver iterando: permite destruir sem esperar
+# a criação do snapshot final (que leva vários minutos).
+pular_snapshot_final = true
+
+# Ligue quando o ambiente for definitivo, para não destruir o banco por engano.
+protecao_delecao = false

@@ -41,6 +41,7 @@ oficina mecânica. É o alicerce dos outros três repositórios do Tech Challeng
 | ADR-001 a 004 · rede e banco | `tech-challenge-infra-db` · README |
 | ADR-005 a 008, 013 e 014 · cluster, CI e observabilidade | `tech-challenge-infra-k8s` · README |
 | ADR-009 a 012 · autenticação | `tech-challenge-auth-lambda` · README |
+| ADR-015 e 016 · padrão de comunicação e notificação | `tech-challenge-app` · README |
 | Swagger | `<url_api>/docs` na AWS · `http://localhost:8000/docs` localmente |
 | Coleção Postman | `tech-challenge-app` · `postman/oficina.postman_collection.json` |
 | Ambientes e deploy ativo | só produção, com a dispensa de homologação registrada no README do `tech-challenge-app`; o ambiente AWS é efêmero (ADR-013), e a URL da API sai em `make output`, no `tech-challenge-infra-k8s`, durante uma sessão |
@@ -214,7 +215,8 @@ E ainda:
 
 - **Os quatro repositórios no seu GitHub, com estes nomes:** `tech-challenge-app`,
   `tech-challenge-infra-db`, `tech-challenge-infra-k8s` e `tech-challenge-auth-lambda`.
-  Os scripts descobrem o dono pelo remote `origin` de cada clone.
+  Os scripts descobrem o dono pelo remote `origin` de cada clone. Em fork, o GitHub deixa os
+  workflows desligados: habilite-os na aba *Actions* de cada repositório antes do passo 3.
 - **Uma conta AWS** e um perfil do AWS CLI para ela.
 - **Uma conta no New Relic**, do plano gratuito — opcional. A licença (`INGEST - LICENSE`) liga
   o agente e a coleta do cluster; a User key (`NRAK-...`) e o ID da conta criam dashboard,
@@ -231,6 +233,15 @@ gh auth login                     # se ainda não estiver autenticado
 
 Os `make` se recusam a rodar sem `AWS_PROFILE` (ou credenciais no ambiente) e sempre mostram
 a conta antes de agir. É proposital: evita provisionar na conta errada.
+
+> Perfil criado por `aws login` não é lido pelo provider AWS do Terraform. Crie em `~/.aws/config`
+> um perfil que o envolva e use esse no `AWS_PROFILE`:
+>
+> ```ini
+> [profile seu-perfil-tf]
+> region = us-east-1
+> credential_process = aws configure export-credentials --profile seu-perfil --format process
+> ```
 
 ### 1 · Estado remoto — neste repositório
 
@@ -308,6 +319,16 @@ cobrando, sem ninguém capaz de removê-la.
 > Se o `destroy` deste repositório falhar em subnet ou security group logo depois de remover
 > a Lambda, espere alguns minutos e repita: a AWS libera as interfaces de rede da Lambda com atraso.
 
+Ficam na conta, fora do Terraform: o snapshot final do banco (`tech-challenge-final-*`, que cobra
+armazenamento) e o log group do RDS. Para apagar:
+
+```bash
+aws rds describe-db-snapshots --snapshot-type manual --output text \
+  --query "DBSnapshots[?starts_with(DBSnapshotIdentifier, 'tech-challenge-final')].DBSnapshotIdentifier"
+aws rds delete-db-snapshot --db-snapshot-identifier <id-listado>
+aws logs delete-log-group --log-group-name /aws/rds/instance/tech-challenge-postgres/postgresql
+```
+
 ---
 
 ## Dia a dia
@@ -373,7 +394,8 @@ pipeline em que estado ele está — ver ADR-013 naquele repositório. **Job pul
 é o comportamento esperado com o ambiente desligado. Já uma falha de autenticação com a
 variável em `true` fica vermelha e explica no log as causas prováveis.
 
-A `main` é protegida: mudanças de infraestrutura entram apenas por Pull Request revisado.
+A `main` é protegida: mudanças de infraestrutura entram só por Pull Request, com a validação do CI
+obrigatória.
 
 | Configuração no repositório | Tipo | Quem grava |
 |---|---|---|

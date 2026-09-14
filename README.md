@@ -44,8 +44,7 @@ oficina mecânica. É o alicerce dos outros três repositórios do Tech Challeng
 | ADR-015 e 016 · padrão de comunicação e notificação | `tech-challenge-app` · README |
 | Swagger | `<url_api>/docs` na AWS · `http://localhost:8000/docs` localmente |
 | Coleção Postman | `tech-challenge-app` · `postman/oficina.postman_collection.json` |
-| Ambientes e deploy ativo | só produção, com a dispensa de homologação registrada no README do `tech-challenge-app`; o ambiente AWS é efêmero (ADR-013), e a URL da API sai em `make output`, no `tech-challenge-infra-k8s`, durante uma sessão |
-
+| Ambientes e deploy ativo | Só produção, justificado no `tech-challenge-app` · README, seção *Deploy*. O ambiente AWS é efêmero (ADR-013): a URL da API sai em `make output`, no `tech-challenge-infra-k8s`, enquanto a sessão dura |
 
 ---
 

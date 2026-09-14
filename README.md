@@ -199,8 +199,9 @@ E ainda:
   `tech-challenge-infra-db`, `tech-challenge-infra-k8s` e `tech-challenge-auth-lambda`.
   Os scripts descobrem o dono pelo remote `origin` de cada clone.
 - **Uma conta AWS** e um perfil do AWS CLI para ela.
-- **Uma chave de licença do New Relic**, do plano gratuito — opcional; sem ela o cluster
-  sobe sem o agente de observabilidade.
+- **Uma conta no New Relic**, do plano gratuito — opcional. A licença (`INGEST - LICENSE`) liga
+  o agente e a coleta do cluster; a User key (`NRAK-...`) e o ID da conta criam dashboard,
+  alertas e monitor de uptime. Todas ficam em **API keys**, no New Relic.
 
 ### 0 · Aponte para a conta certa
 
@@ -228,10 +229,15 @@ make apply        # ~10 min; revise o plano antes de confirmar
 ### 3 · Cluster e gateway — no `tech-challenge-infra-k8s`
 
 ```bash
-export NEW_RELIC_LICENSE_KEY=...  # opcional
-make github-segredos              # grava AWS_ROLE_ARN (e a chave do New Relic) nos 4 repositórios
-make up                           # ~15 min · a cobrança por hora começa aqui
+export NEW_RELIC_LICENSE_KEY=...    # opcional: agente e coleta do cluster
+export NEW_RELIC_API_KEY=NRAK-...   # opcional: dashboard, alertas e monitor
+export NEW_RELIC_ACCOUNT_ID=...     # junto com a User key
+make github-segredos                # grava AWS_ROLE_ARN e as chaves do New Relic nos repositórios
+make up                             # ~15 min · a cobrança por hora começa aqui
 ```
+
+Mantenha as variáveis do New Relic exportadas até o `make down`: sem a User key, o Terraform
+não consegue apagar o dashboard e os alertas, e o `down` recusa rodar.
 
 Ao terminar, o `make up` liga `AMBIENTE_ATIVO` nos quatro repositórios.
 
@@ -251,6 +257,7 @@ Acompanhe na aba *Actions* de cada repositório.
    `make segredo` neste repositório (campo `ADMIN_PASSWORD`).
 3. Cadastre um cliente e abra uma ordem de serviço para ele.
 4. Autentique esse cliente pelo CPF em `POST /auth/cpf` e use o token nas rotas de cliente.
+5. Com a User key configurada, abra o dashboard **Tech Challenge · Oficina** no New Relic.
 
 ### 6 · Derrubar tudo — nesta ordem
 

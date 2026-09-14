@@ -218,7 +218,8 @@ E ainda:
 - **Uma conta AWS** e um perfil do AWS CLI para ela.
 - **Uma conta no New Relic**, do plano gratuito — opcional. A licença (`INGEST - LICENSE`) liga
   o agente e a coleta do cluster; a User key (`NRAK-...`) e o ID da conta criam dashboard,
-  alertas e monitor de uptime. Todas ficam em **API keys**, no New Relic.
+  alertas e monitor de uptime. A User key e o ID da conta ficam em **API keys**; a licença sai
+  pela API no passo 3, porque essa tela pode mostrar só o ID dela.
 
 ### 0 · Aponte para a conta certa
 
@@ -246,11 +247,26 @@ make apply        # ~10 min; revise o plano antes de confirmar
 ### 3 · Cluster e gateway — no `tech-challenge-infra-k8s`
 
 ```bash
-export NEW_RELIC_LICENSE_KEY=...    # opcional: agente e coleta do cluster
 export NEW_RELIC_API_KEY=NRAK-...   # opcional: dashboard, alertas e monitor
 export NEW_RELIC_ACCOUNT_ID=...     # junto com a User key
-make github-segredos                # grava AWS_ROLE_ARN e as chaves do New Relic nos repositórios
-make up                             # ~15 min · a cobrança por hora começa aqui
+```
+
+A licença, que liga os agentes, sai pela API usando a User key. Para conta na região EU, troque o
+endereço por `api.eu.newrelic.com` e exporte também `TF_VAR_newrelic_regiao=EU`.
+
+```bash
+export NEW_RELIC_LICENSE_KEY=$(curl -s https://api.newrelic.com/graphql \
+  -H "API-Key: $NEW_RELIC_API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"query\":\"{ actor { apiAccess { keySearch(query: {types: INGEST, scope: {accountIds: [$NEW_RELIC_ACCOUNT_ID]}}) { keys { ... on ApiAccessIngestKey { key ingestType } } } } } }\"}" \
+  | python3 -c 'import json, sys
+d = json.load(sys.stdin)
+chaves = ((d.get("data") or {}).get("actor") or {}).get("apiAccess", {}).get("keySearch", {}).get("keys") or []
+licenca = next((k["key"] for k in chaves if k.get("ingestType") == "LICENSE" and k.get("key")), "")
+print(licenca) if licenca else sys.exit("New Relic recusou a chave: " + str(d.get("errors")))')
+echo "licença: ${#NEW_RELIC_LICENSE_KEY} caracteres"   # esperado: 40
+
+make github-segredos   # grava AWS_ROLE_ARN e as chaves do New Relic nos repositórios
+make up                # ~20 min · a cobrança por hora começa aqui
 ```
 
 Mantenha as variáveis do New Relic exportadas até o `make down`: sem a User key, o Terraform

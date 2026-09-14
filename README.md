@@ -27,30 +27,62 @@ oficina mecânica. É o alicerce dos outros três repositórios do Tech Challeng
 
 ---
 
+## Documentação
+
+| Documento | Onde está |
+|---|---|
+| Diagrama de componentes | `tech-challenge-infra-k8s` · README, seção *Arquitetura* |
+| Sequência da autenticação por CPF | `tech-challenge-infra-k8s` · README, *Fluxo de uma requisição autenticada* |
+| Sequência da abertura de ordem de serviço | `tech-challenge-app` · README, *Abertura de uma ordem de serviço* |
+| Modelo de dados: ER, relacionamentos e ajustes | `tech-challenge-app` · `docs/modelo-de-dados.md` |
+| RFC-001 · Escolha da nuvem | `tech-challenge-infra-k8s` · `docs/rfc/RFC-001-nuvem.md` |
+| RFC-002 · Escolha do banco de dados | `tech-challenge-infra-db` · `docs/rfc/RFC-002-banco-de-dados.md` |
+| RFC-003 · Estratégia de autenticação | `tech-challenge-auth-lambda` · `docs/rfc/RFC-003-autenticacao.md` |
+| ADR-001 a 004 · rede e banco | `tech-challenge-infra-db` · README |
+| ADR-005 a 008, 013 e 014 · cluster, CI e observabilidade | `tech-challenge-infra-k8s` · README |
+| ADR-009 a 012 · autenticação | `tech-challenge-auth-lambda` · README |
+| Swagger | `<url_api>/docs` na AWS · `http://localhost:8000/docs` localmente |
+| Coleção Postman | `tech-challenge-app` · `postman/oficina.postman_collection.json` |
+| Ambientes e deploy ativo | só produção, com a dispensa de homologação registrada no README do `tech-challenge-app`; o ambiente AWS é efêmero (ADR-013), e a URL da API sai em `make output`, no `tech-challenge-infra-k8s`, durante uma sessão |
+
+
+---
+
 ## O que é criado
 
-```
-                          VPC  10.0.0.0/16
-   ┌──────────────────────────────────────────────────────────────┐
-   │                                                              │
-   │   SUBNETS PÚBLICAS            SUBNETS PRIVADAS                │
-   │   10.0.0.0/20   (us-east-1a)  10.0.128.0/20  (us-east-1a)    │
-   │   10.0.16.0/20  (us-east-1b)  10.0.144.0/20  (us-east-1b)    │
-   │                                                              │
-   │   ┌──────────────────┐        ┌───────────────────────────┐  │
-   │   │ nodes do EKS     │        │  RDS PostgreSQL 16        │  │
-   │   │ load balancers   │───────►│  db.t4g.micro · 20 GB gp3 │  │
-   │   │ (criados pelo    │  :5432 │  criptografado · TLS      │  │
-   │   │  infra-k8s)      │        │  sem acesso público       │  │
-   │   └────────┬─────────┘        └───────────────────────────┘  │
-   │            │                                                 │
-   │       Internet Gateway            sem rota para a internet    │
-   └────────────┼─────────────────────────────────────────────────┘
-                ▼
-             internet
+```mermaid
+flowchart TB
+    internet(("internet"))
 
-   Sem NAT Gateway — economia de ~US$ 32/mês. Ver ADR-002.
+    subgraph vpc["VPC 10.0.0.0/16 · us-east-1a e us-east-1b"]
+        igw["Internet Gateway"]
+
+        subgraph publicas["Subnets públicas · 10.0.0.0/20 e 10.0.16.0/20"]
+            nodes["Nodes do EKS<br/>tech-challenge-infra-k8s"]
+        end
+
+        subgraph privadas["Subnets privadas · 10.0.128.0/20 e 10.0.144.0/20 · sem rota para a internet"]
+            nlb["NLB interno · encaminha aos nodes na 30080<br/>tech-challenge-infra-k8s"]
+            lambda["Lambda de autenticação<br/>tech-challenge-auth-lambda"]
+            rds[("RDS PostgreSQL 16<br/>db.t4g.micro · gp3 de 20 a 50 GB<br/>criptografado · TLS obrigatório")]
+        end
+    end
+
+    grupo{{"security group cliente-db"}}
+    segredo[("Secrets Manager<br/>tech-challenge/app")]
+    contrato[("SSM Parameter Store<br/>/tech-challenge/*")]
+    consumidores["infra-k8s · auth-lambda · pipeline do app"]
+
+    internet <--> igw
+    igw <--> nodes
+    nodes -.-|membro| grupo
+    lambda -.-|membro| grupo
+    grupo -->|":5432 · único acesso aceito"| rds
+    segredo -.->|credenciais e SECRET_KEY| consumidores
+    contrato -.->|ids de rede e do grupo| consumidores
 ```
+
+Sem NAT Gateway, uma economia de ~US$ 32/mês (ADR-002).
 
 Além disso: **Secrets Manager** com as credenciais, e **SSM Parameter Store** com o
 contrato de integração.
@@ -152,28 +184,13 @@ e a autorização continua explícita — não existe regra `0.0.0.0/0` em lugar
 
 ## Por que PostgreSQL relacional
 
-O domínio é **transacional e fortemente relacional**. O caso decisivo: quando uma Ordem
-de Serviço entra em execução, o sistema precisa baixar as peças do estoque **e** mudar o
-status da OS — atomicamente. Se a baixa falhar por estoque insuficiente, a transição
-inteira tem que voltar atrás. Isso é uma transação ACID, não um caso de consistência
-eventual.
+O domínio é transacional e relacional. Quando a OS entra em execução, a baixa das peças e a
+mudança de status acontecem juntas, com bloqueio de linha para que duas OS não consumam a mesma
+peça e com integridade referencial entre cliente, veículo, OS e itens.
 
-Somam-se a isso:
-
-- **Integridade referencial** entre cliente, veículo, OS e itens é regra de negócio, não
-  detalhe de implementação. Um item de OS sem OS não pode existir.
-- **Concorrência controlada:** a aplicação usa `SELECT ... FOR UPDATE` para evitar que
-  duas OS simultâneas consumam a mesma peça. Depende de bloqueio em nível de linha.
-- **Unicidade real** de CPF/CNPJ e placa, garantida por constraint no banco.
-- **Consultas por múltiplos critérios** (fila por prioridade, tempo médio por status)
-  são naturais em SQL.
-
-Um banco de documentos exigiria duplicar dados entre agregados e resolver consistência
-na aplicação — trabalho a mais, para um volume que um `db.t4g.micro` atende com folga.
-
-**PostgreSQL** especificamente, entre os relacionais: gratuito, com o melhor suporte a
-tipos ricos (o `JSONB` abre caminho para dados semiestruturados sem trocar de banco),
-já em uso desde a Fase 01 e com excelente integração ao SQLAlchemy.
+A comparação com MySQL, Aurora, DynamoDB e DocumentDB, e as consequências aceitas, estão na
+[RFC-002](docs/rfc/RFC-002-banco-de-dados.md). O diagrama ER e os ajustes no modelo relacional ficam
+no `tech-challenge-app`, em `docs/modelo-de-dados.md`.
 
 ---
 
@@ -330,8 +347,7 @@ Contas novas com free tier elegível cobrem 750 h/mês de `db.t4g.micro` nos pri
 
 | Evento | `AMBIENTE_ATIVO` | O que acontece |
 |---|---|---|
-| Pull Request | qualquer | `fmt` e `validate` |
-| Pull Request | `true` | acima, mais `plan` comentado no PR |
+| Pull Request | qualquer | `fmt` e `validate`; sem `plan`, porque só a `main` assume a role (ADR-007) |
 | push em `main` ou execução manual | `true` | `plan` e `apply` |
 | push em `main` ou execução manual | ausente ou `false` | só validação; plan e apply **pulados**, com o motivo no resumo |
 

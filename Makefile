@@ -32,19 +32,19 @@ validate: ## Valida a configuração, sem AWS
 	terraform validate
 
 plan: conta ## Mostra o que será alterado
-	@test -d .terraform || $(MAKE) --no-print-directory init
+	@test -f .terraform/terraform.tfstate || $(MAKE) --no-print-directory init
 	terraform plan
 
 apply: conta ## Provisiona rede, banco e segredos (~10 min)
 	@aws s3api head-bucket --bucket $(BUCKET) 2>/dev/null || { echo "Bucket do estado inexistente: rode 'make bootstrap'."; exit 1; }
-	@test -d .terraform || $(MAKE) --no-print-directory init
+	@test -f .terraform/terraform.tfstate || $(MAKE) --no-print-directory init
 	terraform apply
 
 destroy: conta ## Destrói rede e banco; exige Lambda e cluster já destruídos
 	@! aws ssm get-parameter --name /tech-challenge/cluster/nome >/dev/null 2>&1 || { echo "O cluster ainda existe: rode 'make down' no tech-challenge-infra-k8s."; exit 1; }
 	@! aws lambda get-function --function-name tech-challenge-auth >/dev/null 2>&1 || { echo "A Lambda ainda existe: rode 'make destroy' no tech-challenge-auth-lambda."; exit 1; }
 	@read -r -p "Isto apaga o banco da oficina. Digite 'destruir': " r && [ "$$r" = "destruir" ]
-	@test -d .terraform || $(MAKE) --no-print-directory init
+	@test -f .terraform/terraform.tfstate || $(MAKE) --no-print-directory init
 	@terraform destroy || { echo "Se falhou em subnet ou security group logo após remover a Lambda, aguarde alguns minutos e repita."; exit 1; }
 
 output: ## Exibe os outputs
